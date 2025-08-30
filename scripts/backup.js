@@ -6,7 +6,7 @@ const dataDir = path.join(root, 'data');
 const srcDb = path.join(dataDir, 'app.db');
 const srcWal = path.join(dataDir, 'app.db-wal');
 const srcShm = path.join(dataDir, 'app.db-shm');
-const outDir = path.join(root, 'backups');
+const outDir = path.join(dataDir, 'backups');
 
 fs.mkdirSync(outDir, { recursive: true });
 
