@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Parcabul – Admin</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;background:#fafafa;color:#222}
+    h1{margin:0 0 16px}
+    .card{background:#fff;border:1px solid #eee;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,0.04)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
+    .btn{cursor:pointer;background:#111;color:#fff;border:none;border-radius:8px;padding:8px 12px;text-decoration:none;display:inline-block}
+    .btn:hover{opacity:.9}
+    .muted{color:#666;font-size:12px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    pre{background:#f6f6f6;border:1px solid #eee;border-radius:8px;padding:8px;overflow:auto}
+  </style>
+</head>
+<body>
+  <h1>Parcabul – Admin</h1>
+
+  <div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div>
+      <label style="font-size:12px;color:#666">Admin Token</label>
+      <input id="admTok" placeholder="ADMIN_TOKEN" style="width:260px;padding:8px;border:1px solid #ddd;border-radius:8px" />
+      <button class="btn" id="btnSaveTok">Kaydet</button>
+      <span class="muted">Sunucu: http://127.0.0.1:3000</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;gap:8px;align-items:center">
+      <label>Son kaç talep?</label>
+      <input id="limit" type="number" value="20" min="1" max="100" style="width:80px;padding:8px;border:1px solid #ddd;border-radius:8px" />
+      <button class="btn" id="btnLoad">Listele</button>
+    </div>
+    <div id="list"></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h3>Talep Detayı</h3>
+      <div id="detail">Seçim yapın…</div>
+    </div>
+    <div class="card">
+      <h3>Eşleşmeler</h3>
+      <div id="matches">Seçim yapın…</div>
+    </div>
+  </div>
+
+  <script>
+    // --- Token yönetimi ---
+    const tokInput = document.getElementById('admTok');
+    const saved = localStorage.getItem('ADMIN_TOKEN') || '';
+    tokInput.value = saved;
+
+    document.getElementById('btnSaveTok').addEventListener('click', () => {
+      localStorage.setItem('ADMIN_TOKEN', tokInput.value.trim());
+      alert('Token kaydedildi.');
+    });
+
+    function getToken() {
+      return localStorage.getItem('ADMIN_TOKEN') || '';
+    }
+
+    async function fetchWithAuth(url, options = {}) {
+      const t = getToken();
+      options.headers = Object.assign({}, options.headers, { 'x-admin-token': t });
+      return fetch(url, options);
+    }
+    // ----------------------
+
+    const listEl = document.getElementById('list');
+    const detailEl = document.getElementById('detail');
+    const matchesEl = document.getElementById('matches');
+
+    async function loadList() {
+      const limit = Math.max(1, Math.min(Number(document.getElementById('limit').value) || 20, 100));
+      listEl.innerHTML = 'Yükleniyor…';
+      const r = await fetchWithAuth(`http://127.0.0.1:3000/api/admin/requests?limit=${limit}`);
+      const j = await r.json();
+      if (!j.ok) { listEl.innerHTML = 'Hata: ' + (j.error || ''); return; }
+      if (!j.items || j.items.length === 0) { listEl.innerHTML = 'Kayıt yok.'; return; }
+
+      const rows = j.items.map(it => `
+        <tr>
+          <td><a href="#" data-id="${it.talepId}" class="talepLink">${it.talepId}</a></td>
+          <td>${it.musteriAd}</td>
+          <td>${it.musteriTelefon}</td>
+          <td>${it.count}</td>
+          <td>${it.createdAt}</td>
+        </tr>
+      `).join('');
+
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Talep ID</th><th>Müşteri</th><th>Telefon</th><th>Adet</th><th>Tarih</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      document.querySelectorAll('.talepLink').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = a.getAttribute('data-id');
+          loadDetail(id);
+        });
+      });
+    }
+
+    function buildWALink({ phone, talepId, crit, match }) {
+      if (!phone) return '#';
+      const norm = String(phone).replace(/[^\d]/g,'');
+      const lines = [
+        `Talep ID: ${talepId}`,
+        `Marka: ${crit.marka}`,
+        `Model: ${crit.model}`,
+        `Yıl: ${crit.yil}`,
+        `Parça: ${crit.parcaKodu}`,
+        crit.sehir ? `Şehir: ${crit.sehir}` : null,
+        crit.durum ? `Durum: ${crit.durum}` : null,
+        match?.parcaAdi ? `Parça Adı: ${match.parcaAdi}` : null
+      ].filter(Boolean).join('\n');
+      return `https://wa.me/${norm}?text=${encodeURIComponent(lines)}`;
+    }
+
+    async function loadDetail(talepId) {
+      detailEl.innerHTML = 'Yükleniyor…';
+      matchesEl.innerHTML = 'Yükleniyor…';
+
+      const r = await fetchWithAuth(`http://127.0.0.1:3000/api/admin/requests/${talepId}`);
+      const j = await r.json();
+      if (!j.ok) { detailEl.innerHTML = 'Hata: ' + (j.error || ''); matchesEl.innerHTML=''; return; }
+
+      const crit = JSON.parse(j.request.criteriaJson || '{}');
+      const filt = JSON.parse(j.request.filterJson || '{}');
+
+      detailEl.innerHTML = `
+        <div><b>${j.request.talepId}</b></div>
+        <div>${j.request.musteriAd} — ${j.request.musteriTelefon}</div>
+        <div class="muted">Oluşturma: ${j.request.createdAt}</div>
+        <h4>Kriter</h4>
+        <pre>${JSON.stringify(crit, null, 2)}</pre>
+        <h4>Filtre</h4>
+        <pre>${JSON.stringify(filt, null, 2)}</pre>
+      `;
+
+      if (!Array.isArray(j.matches) || j.matches.length === 0) {
+        matchesEl.innerHTML = 'Eşleşme yok.';
+        return;
+      }
+
+      const rows = j.matches.map(m => {
+        const wa = buildWALink({ phone: m.telefon, talepId: j.request.talepId, crit: { ...crit, ...filt }, match: { parcaAdi: 'Parça' } });
+        return `
+          <tr>
+            <td>${m.tedarikci}</td>
+            <td>${m.sehir}</td>
+            <td>${m.durum}</td>
+            <td>${m.fiyatTL ?? '-'}</td>
+            <td><a class="btn" target="_blank" rel="noopener" href="${wa}">WhatsApp’a yaz</a></td>
+          </tr>
+        `;
+      }).join('');
+
+      matchesEl.innerHTML = `
+        <table>
+          <thead><tr><th>Tedarikçi</th><th>Şehir</th><th>Durum</th><th>Fiyat (TL)</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    document.getElementById('btnLoad').addEventListener('click', loadList);
+    // Sayfa açılınca token yoksa sor
+    if (!getToken()) {
+      const t = prompt('Admin Token (x-admin-token):') || '';
+      localStorage.setItem('ADMIN_TOKEN', t.trim());
+      tokInput.value = t.trim();
+    }
+    loadList(); // sayfa açılınca listele
+  </script>
+</body>
+</html>

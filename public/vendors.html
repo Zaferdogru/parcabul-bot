@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Parcabul – Parçacı Yönetimi</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;background:#fafafa;color:#222}
+    h1{margin:0 0 16px}
+    .card{background:#fff;border:1px solid #eee;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,0.04)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
+    input,button{padding:8px;border:1px solid #ddd;border-radius:8px}
+    .btn{cursor:pointer;background:#111;color:#fff;border:none;border-radius:8px;padding:8px 12px;text-decoration:none;display:inline-block}
+    .btn:hover{opacity:.9}
+    .muted{color:#666;font-size:12px}
+  </style>
+</head>
+<body>
+  <h1>Parçacı Yönetimi</h1>
+
+  <div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div>
+      <label style="font-size:12px;color:#666">Admin Token</label>
+      <input id="admTok" placeholder="ADMIN_TOKEN" style="width:260px" />
+      <button class="btn" id="btnSaveTok">Kaydet</button>
+      <span class="muted">Sunucu: http://127.0.0.1:3000</span>
+      <a class="btn" href="/ui/admin.html" style="margin-left:8px">Admin Anasayfa</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="q" placeholder="Ara (ad/telefon/şehir)" style="flex:1" />
+      <input id="limit" type="number" value="50" min="1" max="200" style="width:100px" />
+      <button class="btn" id="btnSearch">Listele</button>
+    </div>
+    <div id="list" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Yeni / Güncelle</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label>Ad</label>
+        <input id="ad" placeholder="Örnek Parçacı" />
+      </div>
+      <div>
+        <label>Telefon (9055...)</label>
+        <input id="telefon" placeholder="90555..." />
+      </div>
+      <div>
+        <label>Şehir</label>
+        <input id="sehir" placeholder="İstanbul" />
+      </div>
+      <div>
+        <label>Durumlar (virgülle: sıfır,çıkma,yenilenmiş)</label>
+        <input id="durumlar" placeholder="sıfır,çıkma" />
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn" id="btnAdd">Ekle</button>
+      <button class="btn" id="btnUpdate" disabled>Seçiliyi Güncelle</button>
+      <button class="btn" id="btnClear">Temizle</button>
+    </div>
+    <div id="status" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <script>
+    const listEl = document.getElementById('list');
+    const statusEl = document.getElementById('status');
+    const tokInput = document.getElementById('admTok');
+    tokInput.value = localStorage.getItem('ADMIN_TOKEN') || '';
+
+    document.getElementById('btnSaveTok').addEventListener('click', () => {
+      localStorage.setItem('ADMIN_TOKEN', tokInput.value.trim());
+      alert('Token kaydedildi.');
+    });
+
+    function getToken() { return localStorage.getItem('ADMIN_TOKEN') || ''; }
+    async function fa(url, opts={}) {
+      opts.headers = Object.assign({}, opts.headers, {'x-admin-token': getToken(), 'Content-Type': 'application/json'});
+      return fetch(url, opts);
+    }
+
+    let selectedId = null;
+    function fillForm(v) {
+      selectedId = v?.id || null;
+      document.getElementById('ad').value = v?.ad || '';
+      document.getElementById('telefon').value = v?.telefon || '';
+      document.getElementById('sehir').value = v?.sehir || '';
+      document.getElementById('durumlar').value = (v?.durumlar || []).join(',');
+      document.getElementById('btnUpdate').disabled = !selectedId;
+    }
+    document.getElementById('btnClear').addEventListener('click', () => fillForm(null));
+
+    async function loadList() {
+      const q = encodeURIComponent(document.getElementById('q').value || '');
+      const limit = Math.max(1, Math.min(Number(document.getElementById('limit').value)||50, 200));
+      const r = await fetch(`http://127.0.0.1:3000/api/vendors?q=${q}&limit=${limit}`);
+      const j = await r.json();
+      if (!j.ok) { listEl.innerHTML = 'Hata: ' + (j.error || ''); return; }
+      if (!j.vendors || j.vendors.length === 0) { listEl.innerHTML = 'Kayıt yok.'; return; }
+
+      const rows = j.vendors.map(v => `
+        <tr>
+          <td>${v.id}</td>
+          <td>${v.ad}</td>
+          <td>${v.telefon}</td>
+          <td>${v.sehir || '-'}</td>
+          <td>${(v.durumlar||[]).join(', ')}</td>
+          <td>
+            <button class="btn btnSel" data-id="${v.id}">Seç</button>
+            <button class="btn btnDel" data-id="${v.id}">Sil</button>
+          </td>
+        </tr>
+      `).join('');
+
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Ad</th><th>Telefon</th><th>Şehir</th><th>Durumlar</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      document.querySelectorAll('.btnSel').forEach(b => {
+        b.addEventListener('click', () => {
+          const id = Number(b.getAttribute('data-id'));
+          const v = j.vendors.find(x => x.id === id);
+          fillForm(v);
+        });
+      });
+      document.querySelectorAll('.btnDel').forEach(b => {
+        b.addEventListener('click', async () => {
+          if (!confirm('Silinsin mi?')) return;
+          const id = Number(b.getAttribute('data-id'));
+          const r = await fa(`http://127.0.0.1:3000/api/admin/vendors/${id}`, { method: 'DELETE' });
+          const j2 = await r.json();
+          statusEl.textContent = j2.ok ? 'Silindi.' : ('Hata: ' + (j2.error || ''));
+          loadList();
+        });
+      });
+    }
+
+    document.getElementById('btnSearch').addEventListener('click', loadList);
+    loadList();
+
+    document.getElementById('btnAdd').addEventListener('click', async () => {
+      const body = {
+        ad: document.getElementById('ad').value.trim(),
+        telefon: document.getElementById('telefon').value.trim(),
+        sehir: document.getElementById('sehir').value.trim(),
+        durumlar: document.getElementById('durumlar').value.trim()
+      };
+      const r = await fa('http://127.0.0.1:3000/api/admin/vendors', { method: 'POST', body: JSON.stringify(body) });
+      const j = await r.json();
+      statusEl.textContent = j.ok ? `Eklendi (id=${j.id}).` : ('Hata: ' + (j.error || ''));
+      if (j.ok) { fillForm(null); loadList(); }
+    });
+
+    document.getElementById('btnUpdate').addEventListener('click', async () => {
+      if (!selectedId) return;
+      const body = {
+        ad: document.getElementById('ad').value.trim(),
+        telefon: document.getElementById('telefon').value.trim(),
+        sehir: document.getElementById('sehir').value.trim(),
+        durumlar: document.getElementById('durumlar').value.trim()
+      };
+      const r = await fa(`http://127.0.0.1:3000/api/admin/vendors/${selectedId}`, { method: 'PUT', body: JSON.stringify(body) });
+      const j = await r.json();
+      statusEl.textContent = j.ok ? 'Güncellendi.' : ('Hata: ' + (j.error || ''));
+      if (j.ok) { loadList(); }
+    });
+  </script>
+</body>
+</html>
