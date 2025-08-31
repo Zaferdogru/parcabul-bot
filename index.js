@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const cron = require('node-cron');
+const { runBackup } = require('./scripts/backup');
 
 const partsRouter = require('./routes/parts');
 const talepRouter = require('./routes/talep');
@@ -11,6 +13,8 @@ const adminRouter = require('./routes/admin');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+app.set('trust proxy', 1); // Render/Proxy arkasında doğru IP
 
 // istek id + log
 app.use((req, res, next) => {
@@ -57,7 +61,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, error: 'Beklenmeyen bir hata oluştu.' });
 });
 
-// sunucu (0.0.0.0 dinler; deploy için uygun)
+// === GÜNLÜK OTOMATİK YEDEK: 03:00 Europe/Istanbul ===
+cron.schedule('0 3 * * *', () => {
+  try {
+    const info = runBackup();
+    console.log('AUTO BACKUP OK', info);
+  } catch (e) {
+    console.error('AUTO BACKUP ERROR', e);
+  }
+}, { timezone: 'Europe/Istanbul' });
+
+// sunucu (Render PORT’u otomatik verir)
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

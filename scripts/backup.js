@@ -2,15 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const dataDir = path.join(root, 'data');
+const dataDir = path.join(root, 'data');        // <- PERSISTENT DISK
 const srcDb = path.join(dataDir, 'app.db');
 const srcWal = path.join(dataDir, 'app.db-wal');
 const srcShm = path.join(dataDir, 'app.db-shm');
-const outDir = path.join(dataDir, 'backups');
+const outDir = path.join(dataDir, 'backups');   // <- BACKUPS: data/backups
 
-fs.mkdirSync(outDir, { recursive: true });
-
-function ts() {
+function stamp() {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth()+1).padStart(2,'0');
@@ -29,34 +27,45 @@ function copyIfExists(src, dest) {
   return false;
 }
 
-(function main(){
-  if (!fs.existsSync(srcDb)) {
-    console.error('DB bulunamadı:', srcDb);
-    process.exit(1);
-  }
+function runBackup({ keep = 30 } = {}) {
+  fs.mkdirSync(outDir, { recursive: true });
+  if (!fs.existsSync(srcDb)) throw new Error('DB bulunamadı: ' + srcDb);
 
-  const stamp = ts();
-  const destDb = path.join(outDir, `app-${stamp}.db`);
-  const destWal = path.join(outDir, `app-${stamp}.db-wal`);
-  const destShm = path.join(outDir, `app-${stamp}.db-shm`);
+  const ts = stamp();
+  const destDb  = path.join(outDir, `app-${ts}.db`);
+  const destWal = path.join(outDir, `app-${ts}.db-wal`);
+  const destShm = path.join(outDir, `app-${ts}.db-shm`);
 
-  // Kopyala
   fs.copyFileSync(srcDb, destDb);
-  copyIfExists(srcWal, destWal);
-  copyIfExists(srcShm, destShm);
+  const wal = copyIfExists(srcWal, destWal);
+  const shm = copyIfExists(srcShm, destShm);
 
-  console.log('Yedek alındı:', destDb);
-
-  // Elde tutma: son 10 set
+  // elde tut: son 30 dosya
   const files = fs.readdirSync(outDir)
     .filter(f => f.startsWith('app-'))
-    .map(f => ({ name: f, time: fs.statSync(path.join(outDir, f)).mtimeMs }))
-    .sort((a,b) => b.time - a.time);
+    .map(f => ({ name: f, mtime: fs.statSync(path.join(outDir, f)).mtimeMs }))
+    .sort((a,b) => b.mtime - a.mtime);
 
-  const keep = 30; // istersen 10 yap, ben 30 bıraktım
-  const toDelete = files.slice(keep);
-  for (const f of toDelete) {
-    const p = path.join(outDir, f.name);
-    try { fs.unlinkSync(p); } catch {}
+  for (const f of files.slice(30)) {
+    try { fs.unlinkSync(path.join(outDir, f.name)); } catch {}
   }
-})();
+
+  return {
+    ok: true,
+    saved: [destDb, wal ? destWal : null, shm ? destShm : null].filter(Boolean)
+  };
+}
+
+// CLI kullanımında
+if (require.main === module) {
+  try {
+    const info = runBackup();
+    console.log('Backup OK:', info);
+    process.exit(0);
+  } catch (e) {
+    console.error('Backup ERROR:', e.message);
+    process.exit(1);
+  }
+}
+
+module.exports = { runBackup };
